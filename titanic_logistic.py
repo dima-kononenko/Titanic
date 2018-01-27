@@ -4,7 +4,6 @@ import sys
 
 
 if __name__ == "__main__":
-    # execute only if run as a script
     args = sys.argv[1:]
     train_params, train_df = h.clean(args[0] if len(args) > 0 else "train.csv")
     X_train, Y_train, X_test, Y_test = h.prepare(train_df)
