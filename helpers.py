@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
+from sklearn.neighbors import KNeighborsClassifier
 
 def map_category(col, mapping = None):
     categories = col.unique()
@@ -13,6 +14,15 @@ def map_category(col, mapping = None):
 
 def clean_with_mapping(filename, parameters = {}):
     df = pd.read_csv(filename, sep = ",", index_col = 0)
+    df['Cabin'] = df['Cabin'].map(lambda x: str(x).split(' ')[0], na_action='ignore')
+    df['CabinClass'] = df['Cabin'].map(lambda x: x[0], na_action='ignore')
+    df['CabinNo'] = df['Cabin'].map(lambda x: float(x[1:]) if x[1:] != '' else '', na_action='ignore').replace('', np.nan)
+
+    if "cabinClassMap" in parameters:
+        _, cabinClassLabel = map_category(df["CabinClass"], parameters["cabinClassMap"])
+    else:
+        parameters["cabinClassMap"], cabinClassLabel = map_category(df["CabinClass"])
+    df = df.assign(CabinClassLabel = cabinClassLabel)
     
     if "embarkedMap" in parameters:
         _, embarkedLabel = map_category(df["Embarked"], parameters["embarkedMap"])
@@ -21,7 +31,7 @@ def clean_with_mapping(filename, parameters = {}):
     df = df.assign(EmbarkedLabel = embarkedLabel)
     
     if "sexMap" in parameters:
-        _, embarkedLabel = map_category(df["Sex"], parameters["sexMap"])
+        _, sexLabel = map_category(df["Sex"], parameters["sexMap"])
     else:
         parameters["sexMap"], sexLabel = map_category(df["Sex"])
     df = df.assign(SexLabel = sexLabel)
@@ -33,6 +43,7 @@ def clean_with_mapping(filename, parameters = {}):
         parameters["fareStd"] = df["Fare"].std()
     fareStd = parameters["fareStd"]
     df = df.assign(FareNorm = lambda x: (x["Fare"] - fareMean)/fareStd)
+    df["FareNorm"] = df["FareNorm"].fillna(value = 0)
     
     if "ageMean" not in parameters:
         parameters["ageMean"] = df["Age"].mean()
@@ -41,9 +52,18 @@ def clean_with_mapping(filename, parameters = {}):
         parameters["ageStd"] = df["Age"].std()
     ageStd = parameters["ageStd"]
     df = df.assign(AgeNorm = lambda x: (x["Age"] - ageMean)/ageStd)
-    
-    df = df.drop(["Name", "Ticket", "Embarked", "Sex", "Cabin", "Fare", "Age"], axis = 1)
     df["AgeNorm"] = df["AgeNorm"].fillna(value = 0)
+
+    if "cabinNoMean" not in parameters:
+        parameters["cabinNoMean"] = df["CabinNo"].mean()
+    cabinNoMean = parameters["cabinNoMean"]
+    if "cabinNoStd" not in parameters:
+        parameters["cabinNoStd"] = df["CabinNo"].std()
+    cabinNoStd = parameters["cabinNoStd"]
+    df = df.assign(CabinNoNorm = lambda x: (x["CabinNo"] - cabinNoMean)/cabinNoStd)
+    df["CabinNoNorm"] = df["CabinNoNorm"].fillna(value = 0)
+    
+    df = df.drop(["Name", "Ticket", "Embarked", "Sex", "Cabin", "Fare", "Age", 'CabinClass', 'CabinNo'], axis = 1)
     
     return parameters, df
 
@@ -61,6 +81,7 @@ def clean_with_dummy(filename, parameters = {}):
         parameters["fareStd"] = df["Fare"].std()
     fareStd = parameters["fareStd"]
     df = df.assign(FareNorm = lambda x: (x["Fare"] - fareMean)/fareStd)
+    df["FareNorm"] = df["FareNorm"].fillna(value = 0)
 
     if "ageMean" not in parameters:
         parameters["ageMean"] = df["Age"].mean()
@@ -91,17 +112,17 @@ def clean_with_dummy(filename, parameters = {}):
 
 def prepare(df):
     X = df.drop(['Survived'], axis = 1)
-    Y = df["Survived"]
+    Y = df["Survived"].to_frame()
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size = 0.3)
-    return X_train.T, Y_train.as_matrix().reshape(1, len(Y_train)), X_test.T, Y_test.as_matrix().reshape(1, len(Y_test))
+    return X_train, Y_train, X_test, Y_test
 
-def train(X_train, Y_train, X_test, Y_test, print_stats = False):
+def train_logistic(X_train, Y_train, X_test, Y_test, print_stats = False):
     costs = []
     tf.reset_default_graph() 
     with tf.Session() as sess:
-        X = tf.placeholder(tf.float32, shape = [X_train.shape[0], None], name = "X")
-        Y = tf.placeholder(tf.float32, shape = [1, None], name = "Y")
-        W = tf.get_variable("W", [1, X_train.shape[0]], initializer = tf.zeros_initializer())
+        X = tf.placeholder(tf.float32, shape = [X_train.shape[1], None], name = "X")
+        Y = tf.placeholder(tf.float32, shape = [Y_train.shape[1], None], name = "Y")
+        W = tf.get_variable("W", [1, X_train.shape[1]], initializer = tf.zeros_initializer())
         b = tf.get_variable("b", [1], initializer = tf.zeros_initializer())
         
         z = tf.sigmoid(tf.add(tf.matmul(W, X), b))
@@ -115,7 +136,7 @@ def train(X_train, Y_train, X_test, Y_test, print_stats = False):
         for epoch in range(15000):
     
             epoch_cost = 0.                       # Defines a cost related to an epoch
-            _, batch_cost = sess.run([optimizer, cost], feed_dict={X: X_train, Y: Y_train})
+            _, batch_cost = sess.run([optimizer, cost], feed_dict={X: X_train.T, Y: Y_train.T})
             epoch_cost += batch_cost
     
             # Print the cost every epoch
@@ -133,11 +154,27 @@ def train(X_train, Y_train, X_test, Y_test, print_stats = False):
 
         # Calculate accuracy on the test set
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
-        accuracy_stats= {'train':  accuracy.eval({X: X_train, Y: Y_train}), 'test': accuracy.eval({X: X_test, Y: Y_test})}
+        accuracy_stats= {'train':  accuracy.eval({X: X_train.T, Y: Y_train.T}), 'test': accuracy.eval({X: X_test.T, Y: Y_test.T})}
 
     return model_params, costs, accuracy_stats
 
-def predict(df, parameters):
+def train_knn(X_train, Y_train, X_test, Y_test):
+    costs = []
+    opt_cost = None
+    opt_knn = None
+    opt_n = None
+    for n in range(1, 100):
+        knn = KNeighborsClassifier(n_neighbors = n)
+        knn.fit(X_train, Y_train['Survived'])
+        s = knn.score(X_test, Y_test['Survived'])
+        costs.append(s)
+        if not opt_cost or s > opt_cost:
+            opt_cost = s
+            opt_knn = knn
+            opt_n = n
+    return opt_knn, costs, opt_n
+
+def predict_logistic(df, parameters):
     with tf.Session() as sess:
         W = tf.convert_to_tensor(parameters["W"])
         b = tf.convert_to_tensor(parameters["b"])
@@ -149,3 +186,8 @@ def predict(df, parameters):
         df['Survived'] = sess.run(p, feed_dict = {X: df.T}).T
     
     return df
+
+def predict_knn(df, classifier):
+    df['Survived'] = classifier.predict(df)
+    return df
+

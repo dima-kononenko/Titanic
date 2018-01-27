@@ -6,14 +6,14 @@ import sys
 def train_with_dummy(args):
     train_params, train_df = h.clean_with_dummy(args[0] if len(args) > 0 else "train.csv")
     X_train, Y_train, X_test, Y_test = h.prepare(train_df)
-    model_params, costs, accuracy = h.train(X_train, Y_train, X_test, Y_test, False)
+    model_params, costs, accuracy = h.train_logistic(X_train, Y_train, X_test, Y_test, False)
     train_params.update(model_params)
     return train_params, accuracy, costs
 
 def train_with_mapping(args):
     train_params, train_df = h.clean_with_mapping(args[0] if len(args) > 0 else "train.csv")
     X_train, Y_train, X_test, Y_test = h.prepare(train_df)
-    model_params, costs, accuracy = h.train(X_train, Y_train, X_test, Y_test, False)
+    model_params, costs, accuracy = h.train_logistic(X_train, Y_train, X_test, Y_test, False)
     train_params.update(model_params)
     return train_params, accuracy, costs
 
@@ -37,11 +37,11 @@ if __name__ == "__main__":
         print("Predicting with dummy variables")
         _, df = h.clean_with_dummy(args[1] if len(args) > 1 else 'test.csv', dummy_params)
         df = df.drop(['Survived'], axis = 1)
-        df = h.predict(df, dummy_params)
+        df = h.predict_logistic(df, dummy_params)
     else:
         print("Predicting with mapping")
-        _, df = h.clean_with_dummy(args[1] if len(args) > 1 else 'test.csv', mapping_params)
-        df = h.predict(df, mapping_params)
+        _, df = h.clean_with_mapping(args[1] if len(args) > 1 else 'test.csv', mapping_params)
+        df = h.predict_logistic(df, mapping_params)
         
     df['Survived'].astype('int64').to_csv(args[2] if len(args) > 2 else 'predict.csv', header = True)
 
