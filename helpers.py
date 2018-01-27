@@ -3,7 +3,51 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
 
-def clean(filename, parameters = {}):
+def map_category(col, mapping = None):
+    categories = col.unique()
+    if mapping is None:
+        mapping = {categories[i] : i+1 for i in range(len(categories))}
+    else:
+        mapping.update({categories[i] : i+1 for i in range(len(categories)) if categories[i] not in mapping})
+    return mapping, col.map(mapping)
+
+def clean_with_mapping(filename, parameters = {}):
+    df = pd.read_csv(filename, sep = ",", index_col = 0)
+    
+    if "embarkedMap" in parameters:
+        _, embarkedLabel = map_category(df["Embarked"], parameters["embarkedMap"])
+    else:
+        parameters["embarkedMap"], embarkedLabel = map_category(df["Embarked"])
+    df = df.assign(EmbarkedLabel = embarkedLabel)
+    
+    if "sexMap" in parameters:
+        _, embarkedLabel = map_category(df["Sex"], parameters["sexMap"])
+    else:
+        parameters["sexMap"], sexLabel = map_category(df["Sex"])
+    df = df.assign(SexLabel = sexLabel)
+    
+    if "fareMean" not in parameters:
+        parameters["fareMean"] = df["Fare"].mean()
+    fareMean = parameters["fareMean"]
+    if "fareStd" not in parameters:
+        parameters["fareStd"] = df["Fare"].std()
+    fareStd = parameters["fareStd"]
+    df = df.assign(FareNorm = lambda x: (x["Fare"] - fareMean)/fareStd)
+    
+    if "ageMean" not in parameters:
+        parameters["ageMean"] = df["Age"].mean()
+    ageMean = parameters["ageMean"]
+    if "ageStd" not in parameters:
+        parameters["ageStd"] = df["Age"].std()
+    ageStd = parameters["ageStd"]
+    df = df.assign(AgeNorm = lambda x: (x["Age"] - ageMean)/ageStd)
+    
+    df = df.drop(["Name", "Ticket", "Embarked", "Sex", "Cabin", "Fare", "Age"], axis = 1)
+    df["AgeNorm"] = df["AgeNorm"].fillna(value = 0)
+    
+    return parameters, df
+
+def clean_with_dummy(filename, parameters = {}):
     df = pd.read_csv(filename, sep = ",", index_col = 0)
     df['Cabin'] = df['Cabin'].map(lambda x: str(x).split(' ')[0], na_action='ignore')
     df['CabinClass'] = df['Cabin'].map(lambda x: x[0], na_action='ignore')
@@ -55,9 +99,9 @@ def train(X_train, Y_train, X_test, Y_test, print_stats = False):
     costs = []
     tf.reset_default_graph() 
     with tf.Session() as sess:
-        X = tf.placeholder(tf.float32, shape = [25, None], name = "X")
+        X = tf.placeholder(tf.float32, shape = [X_train.shape[0], None], name = "X")
         Y = tf.placeholder(tf.float32, shape = [1, None], name = "Y")
-        W = tf.get_variable("W", [1, 25], initializer = tf.zeros_initializer())
+        W = tf.get_variable("W", [1, X_train.shape[0]], initializer = tf.zeros_initializer())
         b = tf.get_variable("b", [1], initializer = tf.zeros_initializer())
         
         z = tf.sigmoid(tf.add(tf.matmul(W, X), b))
@@ -93,13 +137,11 @@ def train(X_train, Y_train, X_test, Y_test, print_stats = False):
 
     return model_params, costs, accuracy_stats
 
-def predict(filename, parameters):
-    _, df = clean(filename, parameters)
-    df = df.drop(['Survived'], axis = 1)
+def predict(df, parameters):
     with tf.Session() as sess:
         W = tf.convert_to_tensor(parameters["W"])
         b = tf.convert_to_tensor(parameters["b"])
-        X = tf.placeholder(tf.float32, shape = [25, None], name = "X")
+        X = tf.placeholder(tf.float32, shape = [df.shape[1], None], name = "X")
         
         z = z = tf.sigmoid(tf.add(tf.matmul(W, X), b))
         p = tf.cast(z > 0.8, "float")
