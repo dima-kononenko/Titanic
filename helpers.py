@@ -3,6 +3,8 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from sklearn.neighbors import KNeighborsClassifier
+import matplotlib.pyplot as plt
+import itertools
 
 def map_category(col, mapping = None):
     categories = col.unique()
@@ -116,7 +118,7 @@ def prepare(df):
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size = 0.3)
     return X_train, Y_train, X_test, Y_test
 
-def train_logistic(X_train, Y_train, X_test, Y_test, print_stats = False):
+def train_logistic(X_train, Y_train, X_test, Y_test, threshold = 0.8, print_stats = False):
     costs = []
     tf.reset_default_graph() 
     with tf.Session() as sess:
@@ -146,7 +148,8 @@ def train_logistic(X_train, Y_train, X_test, Y_test, print_stats = False):
                 costs.append(epoch_cost)
      
         # Calculate the correct predictions
-        correct_prediction = tf.equal(tf.cast(z > 0.8, "float"), Y)
+        p = tf.cast(z > threshold, "float")
+        correct_prediction = tf.equal(p, Y)
 
         #save parameters
         parameters = {"W": W, "b": b}
@@ -155,8 +158,9 @@ def train_logistic(X_train, Y_train, X_test, Y_test, print_stats = False):
         # Calculate accuracy on the test set
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
         accuracy_stats= {'train':  accuracy.eval({X: X_train.T, Y: Y_train.T}), 'test': accuracy.eval({X: X_test.T, Y: Y_test.T})}
+        Y_test_pred = p.eval({X: X_test.T, Y: Y_test.T})
 
-    return model_params, costs, accuracy_stats
+    return model_params, costs, accuracy_stats, Y_test_pred.T
 
 def train_knn(X_train, Y_train, X_test, Y_test):
     costs = []
@@ -174,14 +178,14 @@ def train_knn(X_train, Y_train, X_test, Y_test):
             opt_n = n
     return opt_knn, costs, opt_n
 
-def predict_logistic(df, parameters):
+def predict_logistic(df, parameters, threshold = 0.8):
     with tf.Session() as sess:
         W = tf.convert_to_tensor(parameters["W"])
         b = tf.convert_to_tensor(parameters["b"])
         X = tf.placeholder(tf.float32, shape = [df.shape[1], None], name = "X")
         
-        z = z = tf.sigmoid(tf.add(tf.matmul(W, X), b))
-        p = tf.cast(z > 0.8, "float")
+        z = tf.sigmoid(tf.add(tf.matmul(W, X), b))
+        p = tf.cast(z > threshold, "float")
     
         df['Survived'] = sess.run(p, feed_dict = {X: df.T}).T
     
@@ -190,4 +194,23 @@ def predict_logistic(df, parameters):
 def predict_knn(df, classifier):
     df['Survived'] = classifier.predict(df)
     return df
+
+def plot_confusion_matrix(cm, title, cmap=plt.cm.Blues):
+    classes = ['Not Survived', 'Survived']
+    plt.imshow(cm, interpolation='nearest', cmap=cmap)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(2)
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, format(cm[i, j], 'd'),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
+
+    plt.tight_layout()
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
 
